@@ -4,7 +4,7 @@
 
 **名称**: 你才是真正的小众king  
 **类型**: 网易云歌单分析 + Agent 锐评 + PDF 输出  
-**阶段**: Phase 6 ✅ 完成 → Phase 7 待开始  
+**阶段**: Phase 7 ✅ 完成（v0.1）  
 **最后更新**: 2026-05-07
 
 ---
@@ -172,14 +172,16 @@ C:\Users\heze\yinyue\
 - [x] Phase 4 全部完成（6 个评分文件）
 - [x] Phase 5: Agent 实现（★ 12 个文件全部完成）
 - [x] Phase 6: Streamlit 聊天式 Web UI（★ 修复 QR 登录 + 6 阶段状态机）
+- [x] Phase 7: PDF 排版打磨 + Git init + README + 收尾
 
 ---
 
-## 下一步：Phase 7 — PDF 输出打磨 + 收尾
+## v0.1 完成！
 
-1. PDF 报告排版优化（封面页、图表、彩蛋）
-2. 错误处理完善（网络超时、LLM 限流、缓存降级）
-3. 端到端测试：扫码 → 贴链接 → 回答 → 下载 PDF
-4. README.md 撰写（安装、配置、运行说明）
-5. Git 初始化 + 首次提交
-6. 部署准备（可选：Streamlit Cloud / 局域网分享）
+全部 7 个 Phase 完成，41 个文件已提交 Git（commit `4dde09d`）。
+
+### 后续可选方向（v0.2+）
+- RAG 曲库推歌（BGE embeddings + ChromaDB 向量检索）
+- 网易云评论采集（重新加入评分维度）
+- Streamlit Cloud 部署
+- 多用户支持 / 分析历史管理
