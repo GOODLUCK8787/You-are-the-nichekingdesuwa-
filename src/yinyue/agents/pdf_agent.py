@@ -256,12 +256,20 @@ class PDFAgent:
         pdf.line(x, y, x + width_mm, y)
 
     def _find_chinese_font(self) -> str | None:
+        # Cross-platform: bundled font > Windows fonts > Linux system fonts
         preferred = [
             os.path.join(FONT_DIR, "NotoSansSC-Regular.ttf"),
             "C:/Windows/Fonts/simkai.ttf",
             "C:/Windows/Fonts/simsunb.ttf",
             "C:/Windows/Fonts/msyh.ttc",
             "C:/Windows/Fonts/simsun.ttc",
+            # Linux: Noto CJK installed via packages.txt (fonts-noto-cjk)
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            # Linux: generic CJK font search
+            "/usr/share/fonts/opentype/noto/NotoSansSC-Regular.otf",
+            "/usr/share/fonts/noto/NotoSansSC-Regular.otf",
         ]
         fallback = [
             "C:/Windows/Fonts/NotoSansSC-VF.ttf",
@@ -269,4 +277,12 @@ class PDFAgent:
         for path in preferred + fallback:
             if os.path.exists(path):
                 return path
+        # Last resort: search for any Noto CJK font on Linux
+        try:
+            for root, _dirs, files in os.walk("/usr/share/fonts"):
+                for f in files:
+                    if "NotoSans" in f and ("CJK" in f or "SC" in f):
+                        return os.path.join(root, f)
+        except OSError:
+            pass
         return None

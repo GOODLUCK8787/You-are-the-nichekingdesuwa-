@@ -23,7 +23,16 @@ from yinyue.llm.deepseek_client import DeepSeekClient
 from yinyue.agents.orchestrator import Orchestrator
 from yinyue.api.models import UserAnswer
 
-load_dotenv(_PROJECT_ROOT / ".env")
+# Load API key: Streamlit Cloud secrets > .env file > env var
+try:
+    _secrets_key = st.secrets.get("DEEPSEEK_API_KEY", "")
+except Exception:
+    _secrets_key = ""
+if _secrets_key:
+    os.environ["DEEPSEEK_API_KEY"] = _secrets_key
+else:
+    load_dotenv(_PROJECT_ROOT / ".env")
+
 logger = logging.getLogger(__name__)
 
 # ── Page config (must be first st call) ──────────────────────
@@ -132,92 +141,132 @@ FALLBACK_QUESTIONS = [
 
 # ── Phase: Login ─────────────────────────────────────────────
 
-def render_login():
-    st.markdown('<p class="sakiko-title">🎭 你才是真正的小众king</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sakiko-subtitle">豊川祥子による審判</p>', unsafe_allow_html=True)
+def _api_key_from_secrets() -> str | None:
+    “””Check if API key is set via Streamlit secrets (cloud deployment).”””
+    try:
+        return st.secrets.get(“DEEPSEEK_API_KEY”, “”)
+    except Exception:
+        return None
 
-    with st.expander("🔑 API 设置", expanded=not os.getenv("DEEPSEEK_API_KEY")):
-        api_key = st.text_input(
-            "DeepSeek API Key",
-            value=os.getenv("DEEPSEEK_API_KEY", ""),
-            type="password",
-            placeholder="sk-...",
-            help="在 platform.deepseek.com 注册获取",
-        )
-        if api_key:
-            st.session_state.api_key = api_key
+
+def _browser_login_available() -> bool:
+    “””Check if Playwright + Chromium is installed for browser-based login.”””
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def render_login():
+    st.markdown('<p class=”sakiko-title”>🎭 你才是真正的小众king</p>', unsafe_allow_html=True)
+    st.markdown('<p class=”sakiko-subtitle”>豊川祥子による審判</p>', unsafe_allow_html=True)
+
+    secrets_key = _api_key_from_secrets()
+    env_key = os.getenv(“DEEPSEEK_API_KEY”)
+
+    if not secrets_key and not env_key:
+        with st.expander(“🔑 API 设置”, expanded=True):
+            api_key = st.text_input(
+                “DeepSeek API Key”,
+                value=””,
+                type=”password”,
+                placeholder=”sk-...”,
+                help=”在 platform.deepseek.com 注册获取”,
+            )
+            if api_key:
+                st.session_state.api_key = api_key
+
+        if not st.session_state.api_key:
+            st.warning(“请先设置 DeepSeek API Key 再继续”)
+            return
+    else:
+        st.session_state.api_key = secrets_key or env_key or “”
+        st.success(“API Key 已配置 ✓”)
+        if st.button(“🔓 清除 API Key 并退出”, key=”clear_key”):
+            st.session_state.api_key = “”
+            os.environ.pop(“DEEPSEEK_API_KEY”, None)
+            st.rerun()
 
     st.divider()
 
-    if not st.session_state.api_key and not os.getenv("DEEPSEEK_API_KEY"):
-        st.warning("请先设置 DeepSeek API Key 再继续")
+    if not st.session_state.api_key:
         return
 
     client = get_api_client()
 
-    st.markdown("### 🔐 登录网易云音乐")
-    tab1, tab2 = st.tabs(["🍪 Cookie 登录（推荐）", "🌐 浏览器扫码登录"])
+    st.markdown(“### 🔐 登录网易云音乐”)
+
+    browser_ok = _browser_login_available()
+
+    if browser_ok:
+        tab1, tab2 = st.tabs([“🍪 Cookie 登录（推荐）”, “🌐 浏览器扫码登录”])
+    else:
+        tab1 = st.container()
+        tab2 = None
+        st.info(“💡 云端部署仅支持 Cookie 登录方式，浏览器扫码需本地运行”)
 
     # ── Tab 1: Cookie login ──────────────────────────────
     with tab1:
-        st.markdown("""
+        st.markdown(“””
         **如何获取 Cookie：**
         1. 浏览器打开 [music.163.com](https://music.163.com) 并登录
         2. 按 `F12` → `Application`（应用程序）→ `Cookies` → `music.163.com`
         3. 找到 `MUSIC_U`，复制它的值
         4. 粘贴到下方输入框
-        """)
+        “””)
         cookie_input = st.text_input(
-            "MUSIC_U Cookie",
-            placeholder="粘贴 MUSIC_U 的值或完整 Cookie 字符串...",
-            label_visibility="collapsed",
+            “MUSIC_U Cookie”,
+            placeholder=”粘贴 MUSIC_U 的值或完整 Cookie 字符串...”,
+            label_visibility=”collapsed”,
         )
-        if cookie_input and st.button("🚀 登录", key="cookie_login", use_container_width=True):
+        if cookie_input and st.button(“🚀 登录”, key=”cookie_login”, use_container_width=True):
             if client.login_with_cookie(cookie_input):
-                st.session_state.phase = "input"
+                st.session_state.phase = “input”
                 st.rerun()
             else:
-                st.error("Cookie 无效，请检查是否已登录 music.163.com 并正确复制了 MUSIC_U 的值")
+                st.error(“Cookie 无效，请检查是否已登录 music.163.com 并正确复制了 MUSIC_U 的值”)
 
     # ── Tab 2: Browser QR login ────────────────────────────
-    with tab2:
-        st.markdown("""
-        **流程：**
-        1. 点击下方按钮 → 弹出网易云官网登录窗口
-        2. 在窗口中用手机扫码登录
-        3. 登录成功后回到本页面，点击“检查登录状态”
-        """)
+    if tab2:
+        with tab2:
+            st.markdown(“””
+            **流程：**
+            1. 点击下方按钮 → 弹出网易云官网登录窗口
+            2. 在窗口中用手机扫码登录
+            3. 登录成功后回到本页面，点击”检查登录状态”
+            “””)
 
-        if "browser_launched" not in st.session_state:
-            st.session_state.browser_launched = False
+            if “browser_launched” not in st.session_state:
+                st.session_state.browser_launched = False
 
-        status_placeholder = st.empty()
+            status_placeholder = st.empty()
 
-        if not st.session_state.browser_launched:
-            if st.button("🌐 打开网易云登录窗口", use_container_width=True, type="primary"):
-                proc = client._adapter.launch_browser_login()
-                if proc is None:
-                    st.error("未安装 Playwright，请先运行：pip install playwright && playwright install chromium")
-                else:
-                    st.session_state.browser_launched = True
-                    st.rerun()
-        else:
-            status_placeholder.info("浏览器窗口已打开，请在窗口中用手机扫码登录网易云...")
+            if not st.session_state.browser_launched:
+                if st.button(“🌐 打开网易云登录窗口”, use_container_width=True, type=”primary”):
+                    proc = client._adapter.launch_browser_login()
+                    if proc is None:
+                        st.error(“未安装 Playwright，请先运行：pip install playwright && playwright install chromium”)
+                    else:
+                        st.session_state.browser_launched = True
+                        st.rerun()
+            else:
+                status_placeholder.info(“浏览器窗口已打开，请在窗口中用手机扫码登录网易云...”)
 
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("✅ 检查登录状态", use_container_width=True):
-                    if client._adapter.finish_browser_login():
-                        status_placeholder.success("登录成功！")
-                        st.session_state.phase = "input"
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button(“✅ 检查登录状态”, use_container_width=True):
+                        if client._adapter.finish_browser_login():
+                            status_placeholder.success(“登录成功！”)
+                            st.session_state.phase = “input”
+                            st.session_state.browser_launched = False
+                            st.rerun()
+                        else:
+                            status_placeholder.warning(“还在等待登录，请在浏览器窗口里先扫码”)
+                with col2:
+                    if st.button(“🔄 重新打开”, use_container_width=True):
                         st.session_state.browser_launched = False
                         st.rerun()
-                    else:
-                        status_placeholder.warning("还在等待登录，请在浏览器窗口里先扫码")
-            with col2:
-                if st.button("🔄 重新打开", use_container_width=True):
-                    st.session_state.browser_launched = False
-                    st.rerun()
 
 # ── Phase: URL Input ─────────────────────────────────────────
 
