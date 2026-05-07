@@ -156,7 +156,7 @@ def render_login():
     client = get_api_client()
 
     st.markdown("### 🔐 登录网易云音乐")
-    tab1, tab2 = st.tabs(["🍪 Cookie 登录（推荐）", "📱 扫码登录"])
+    tab1, tab2 = st.tabs(["🍪 Cookie 登录（推荐）", "🌐 浏览器扫码登录"])
 
     # ── Tab 1: Cookie login ──────────────────────────────
     with tab1:
@@ -179,54 +179,45 @@ def render_login():
             else:
                 st.error("Cookie 无效，请检查是否已登录 music.163.com 并正确复制了 MUSIC_U 的值")
 
-    # ── Tab 2: QR login ──────────────────────────────────
+    # ── Tab 2: Browser QR login ────────────────────────────
     with tab2:
-        if st.session_state.qr_key is None:
-            with st.spinner("正在生成登录二维码..."):
-                try:
-                    qr_data = _run(client.get_qr())
-                    st.session_state.qr_key = qr_data["key"]
-                    st.session_state.qr_url = qr_data["url"]
-                except Exception as e:
-                    st.error(f"获取二维码失败: {e}")
-                    return
+        st.markdown("""
+        **流程：**
+        1. 点击下方按钮 → 弹出网易云官网登录窗口
+        2. 在窗口中用手机扫码登录
+        3. 登录成功后回到本页面，点击“检查登录状态”
+        """)
 
-        qr_img = generate_qr_image(st.session_state.qr_url)
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.image(qr_img, caption="📱 请使用网易云音乐 App 扫描二维码", use_container_width=True)
+        if "browser_launched" not in st.session_state:
+            st.session_state.browser_launched = False
 
         status_placeholder = st.empty()
 
-        col1, col2, col3, col4 = st.columns([1, 2, 2, 1])
-        with col2:
-            check_clicked = st.button("🔍 检查登录状态", key="check_login", use_container_width=True)
-        with col3:
-            refresh_clicked = st.button("🔄 刷新二维码", key="refresh_qr", use_container_width=True)
-
-        if check_clicked:
-            try:
-                result = _run(client.check_qr(st.session_state.qr_key))
-                msg = result.get("message", str(result.get("status", "")))
-                status = result["status"]
-                if status == 803:
-                    status_placeholder.success(msg)
-                    st.session_state.phase = "input"
-                    st.rerun()
-                elif status in (801, 802, 8821):
-                    status_placeholder.info(f"📱 {msg}")
-                elif status == 800:
-                    status_placeholder.warning(f"⚠️ {msg}，请点击刷新")
+        if not st.session_state.browser_launched:
+            if st.button("🌐 打开网易云登录窗口", use_container_width=True, type="primary"):
+                proc = client._adapter.launch_browser_login()
+                if proc is None:
+                    st.error("未安装 Playwright，请先运行：pip install playwright && playwright install chromium")
                 else:
-                    status_placeholder.warning(f"状态: {msg}")
-            except Exception as e:
-                status_placeholder.error(f"检查失败: {e}")
+                    st.session_state.browser_launched = True
+                    st.rerun()
+        else:
+            status_placeholder.info("浏览器窗口已打开，请在窗口中用手机扫码登录网易云...")
 
-        if refresh_clicked:
-            st.session_state.qr_key = None
-            st.session_state.qr_url = None
-            st.rerun()
-
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ 检查登录状态", use_container_width=True):
+                    if client._adapter.finish_browser_login():
+                        status_placeholder.success("登录成功！")
+                        st.session_state.phase = "input"
+                        st.session_state.browser_launched = False
+                        st.rerun()
+                    else:
+                        status_placeholder.warning("还在等待登录，请在浏览器窗口里先扫码")
+            with col2:
+                if st.button("🔄 重新打开", use_container_width=True):
+                    st.session_state.browser_launched = False
+                    st.rerun()
 
 # ── Phase: URL Input ─────────────────────────────────────────
 
@@ -266,18 +257,21 @@ def render_input():
 # ── Phase: Generating questions ──────────────────────────────
 
 def render_loading_questions():
+    """Generate questions from LLM, then jump to questions phase."""
     orch = get_orchestrator()
     playlist = st.session_state.playlist
 
     st.markdown(f"### 📋 {playlist.name}")
     st.caption(f"By {playlist.owner_name} · {playlist.song_count} 首歌 · {playlist.play_count} 次播放")
 
-    with st.spinner("祥子正在审视你的歌单，思考要问什么..."):
+    # Always generate questions — LLM first, fallback if it fails
+    with st.spinner("祥子正在审视你的歌单，想想怎么拷问你..."):
         try:
             questions = _run(orch.interviewer.generate_questions(playlist))
+            if not questions or len(questions) == 0:
+                raise ValueError("LLM returned empty questions")
             st.session_state.questions = questions
         except Exception as e:
-            st.warning(f"LLM 生成问题失败，使用默认问题: {e}")
             st.session_state.questions = FALLBACK_QUESTIONS
 
     st.session_state.phase = "questions"
@@ -287,10 +281,12 @@ def render_loading_questions():
 # ── Phase: Questions ─────────────────────────────────────────
 
 def render_questions():
-    st.markdown("### 🎤 先回答我几个问题")
-
+    playlist = st.session_state.playlist
     questions = st.session_state.questions
     user_answers = st.session_state.user_answers
+
+    st.markdown(f"### 🎤 祥子有 {len(questions)} 个问题想问贵方")
+    st.caption(f"关于「{playlist.name}」——")
 
     tone_caption = {
         "好奇": "祥子微微倾头",
@@ -301,40 +297,27 @@ def render_questions():
 
     for q in questions:
         qid = q["id"]
+        tone = q.get("tone", "")
         st.markdown(f"**{q['question']}**")
-        st.caption(tone_caption.get(q.get("tone", ""), ""))
+        if tone in tone_caption:
+            st.caption(tone_caption[tone])
         answer = st.text_input(
             "你的回答",
             key=f"answer_{qid}",
-            placeholder="输入你的回答...",
+            placeholder="说点什么吧，沉默也是一种回答...",
             label_visibility="collapsed",
         )
         if answer:
             user_answers[qid] = answer
         st.divider()
 
-    col1, col2 = st.columns(2)
-    answered_count = len([q for q in questions if user_answers.get(q["id"])])
+    answered_count = sum(1 for q in questions if user_answers.get(q["id"]))
+    st.caption(f"已回答 {answered_count}/{len(questions)} 题")
 
-    if answered_count >= len(questions):
-        st.success(f"已回答全部 {len(questions)} 个问题")
-        with col1:
-            if st.button("⚡ 提交审判", type="primary", use_container_width=True):
-                _build_answers(questions, user_answers)
-                st.session_state.phase = "analyzing"
-                st.rerun()
-    else:
-        st.caption(f"已答 {answered_count}/{len(questions)} 题")
-        with col1:
-            if st.button("⚡ 提交审判", type="primary", use_container_width=True):
-                _build_answers(questions, user_answers)
-                st.session_state.phase = "analyzing"
-                st.rerun()
-    with col2:
-        if st.button("跳过，直接审判", use_container_width=True):
-            _build_answers(questions, user_answers, fill_empty=True)
-            st.session_state.phase = "analyzing"
-            st.rerun()
+    if st.button("⚡ 提交，接受审判", type="primary", use_container_width=True):
+        _build_answers(questions, user_answers, fill_empty=True)
+        st.session_state.phase = "analyzing"
+        st.rerun()
 
 
 def _build_answers(questions, user_answers, fill_empty=False):
@@ -342,7 +325,7 @@ def _build_answers(questions, user_answers, fill_empty=False):
         UserAnswer(
             question_id=q["id"],
             question=q["question"],
-            answer=user_answers.get(q["id"], "") if not fill_empty else (user_answers.get(q["id"]) or "（未回答）"),
+            answer=user_answers.get(q["id"]) or "（未回答）",
         )
         for q in questions
     ]
@@ -395,9 +378,10 @@ def render_results():
     roast = st.session_state.roast
     pdf_path = st.session_state.pdf_path
 
-    # Score overview
     sorted_scores = sorted(scores, key=lambda s: s.overall_score, reverse=True)
-    col_a, col_b = st.columns(2)
+
+    # ── Score header ──────────────────────────────────────
+    col_a, col_b = st.columns([1, 2])
     with col_a:
         st.markdown(f'<p class="score-badge">{roast["score"]:.1f} / 10</p>', unsafe_allow_html=True)
         st.caption("綜合評分")
@@ -407,26 +391,32 @@ def render_results():
             top_name = _song_name(playlist, top_niche.song_netease_id)
             st.metric("最小眾單曲", top_name, f"{top_niche.overall_score:.3f}")
 
-    # Niche ranking
-    st.markdown("#### 🏆 小眾排行 Top 5")
-    for i, s in enumerate(sorted_scores[:5]):
-        name = _song_name(playlist, s.song_netease_id)
-        st.markdown(
-            f'<span class="niche-rank">{i+1}. {name} — {s.overall_score:.4f}</span>',
-            unsafe_allow_html=True,
-        )
-
-    # Roast text
-    st.markdown("#### 📝 祥子的銳評")
-    st.markdown(f'<div class="roast-box">{roast["text"]}</div>', unsafe_allow_html=True)
-
-    # PDF download
     st.divider()
-    st.markdown("#### 📥 下載報告")
+
+    # ── Roast (rendered as proper markdown) ───────────────
+    st.markdown("### 📝 祥子的銳評")
+    # Clean up the roast text for markdown rendering
+    roast_md = roast["text"]
+    # Remove leading/trailing whitespace
+    roast_md = roast_md.strip()
+    with st.container(border=True):
+        st.markdown(roast_md)
+
+    # ── Niche ranking ─────────────────────────────────────
+    with st.expander("🏆 查看小众排行 Top 5"):
+        for i, s in enumerate(sorted_scores[:5]):
+            name = _song_name(playlist, s.song_netease_id)
+            score_pct = int(s.overall_score * 100)
+            st.markdown(f"{i+1}. **{name}**")
+            bar = "▰" * (score_pct // 10) + "▱" * (10 - score_pct // 10)
+            st.caption(f"小众指数  {bar}  {s.overall_score:.4f}")
+
+    # ── PDF download ──────────────────────────────────────
+    st.divider()
     if pdf_path and os.path.exists(pdf_path):
         with open(pdf_path, "rb") as f:
             st.download_button(
-                label="下載 PDF 報告",
+                label="📥 下载 PDF 报告",
                 data=f,
                 file_name=os.path.basename(pdf_path),
                 mime="application/pdf",
@@ -435,7 +425,7 @@ def render_results():
     else:
         st.warning("PDF 文件不存在，請重試")
 
-    # Actions
+    # ── Actions ───────────────────────────────────────────
     st.divider()
     col1, col2 = st.columns(2)
     with col1:

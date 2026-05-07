@@ -4,7 +4,7 @@
 
 **名称**: 你才是真正的小众king  
 **类型**: 网易云歌单分析 + Agent 锐评 + PDF 输出  
-**阶段**: Phase 7 ✅ 完成（v0.1）  
+**阶段**: v0.2 打磨中  
 **最后更新**: 2026-05-07
 
 ---
@@ -19,7 +19,8 @@
 
 **丰川祥子（Togawa Sakiko）** — 《BanG Dream! Ave Mujica》键盘手兼制作人
 - 大小姐式优雅 + 毒舌 + Ave Mujica 假面/人偶/剧场美学
-- 详见蓝图文档的 "🎭 AI 人设" 章节
+- 用中文阴阳怪气，不是日文翻译机
+- 句尾偶尔加"跌丝袜"（ですわ）作为口癖
 
 ---
 
@@ -27,13 +28,14 @@
 
 | 层 | 选型 |
 |---|------|
-| 语言/包管理 | Python 3.12 + pip（uv 待配 PATH） |
-| 网易云数据 | **pycloudmusic**（PyPI 可用，替代了原计划的 pyncm） |
-| LLM | DeepSeek v3（支持 function calling） |
+| 语言/包管理 | Python 3.12 + pip |
+| 网易云数据 | **pycloudmusic**（歌单/歌曲） |
+| 浏览器登录 | **Playwright**（Chromium 自动化，扫码登录方案 B） |
+| LLM | DeepSeek v4-pro（支持 function calling） |
 | Agent | 纯手写，OpenAI SDK function calling，不依赖 LangChain/CrewAI |
-| UI | Streamlit（聊天式交互） |
+| UI | Streamlit（6 阶段状态机） |
 | 存储 | SQLite（缓存歌单数据） |
-| PDF | fpdf2 + Noto Sans SC 字体 |
+| PDF | fpdf2 + simkai.ttf 中文字体 |
 | 进度 | rich（终端日志） |
 
 ---
@@ -44,144 +46,133 @@
 niche_score = 0.35 × 播放量分 + 0.25 × 渗透率分 + 0.25 × 艺人独立分 + 0.15 × 流派稀有度
 ```
 
-无评论维度（评论采集太慢，已砍掉）。详见蓝图。
-
 ---
 
 ## Agent 架构（5 Agent + Orchestrator）
 
-| Agent | 工具 | 职责 |
-|-------|------|------|
-| Data Agent | `fetch_playlist(url)` | 扒歌单 + 歌曲详情 |
-| Interviewer Agent | `ask_user(questions)` | 根据歌单动态生成 3-5 个问题反问用户 |
-| Analyst Agent | `compute_scores(songs)` | 小众分 + 风格画像 |
-| Reviewer Agent | `generate_roast(context)` | 祥子毒舌锐评 |
-| PDF Agent | `render_pdf(context)` | 生成 PDF 报告 |
-
-Orchestrator 用 Context 对象在 Agent 间传递数据，逐步累积信息。
+| Agent | 职责 |
+|-------|------|
+| Data Agent | `step1_fetch(url)` — 扒歌单 + 歌曲详情 |
+| Interviewer Agent | `step2_question(playlist)` — 根据歌单动态生成 3-5 个问题反问用户 |
+| Analyst Agent | `step3_score(songs)` — 小众分计算（纯算法，不调 LLM） |
+| Reviewer Agent | `step4_roast(playlist, scores, answers)` — 祥子毒舌锐评 |
+| PDF Agent | `step5_pdf(playlist, scores, roast, answers)` — 生成 PDF 报告 |
 
 ---
 
-## 目前文件清单
+## 登录方案
+
+| 方式 | 实现 | 状态 |
+|------|------|------|
+| Cookie 登录 | 用户从浏览器复制 MUSIC_U 粘贴 | ✅ 推荐，100% 可用 |
+| 浏览器扫码 | Playwright 打开 Chromium → 用户在网易官网扫码 → 自动提取 Cookie | ✅ v0.2 新增 |
+| API 扫码 | ~~调用网易 QR API 自生成二维码~~ | ❌ 已废弃，反爬太严 |
+
+---
+
+## 文件清单
 
 ```
 C:\Users\heze\yinyue\
-├── pyproject.toml                       # ✅ 项目配置（10 个依赖）
-├── .gitignore                           # ✅ 
-├── .env.example                         # ✅ DEEPSEEK_API_KEY=sk-xxx
-├── PROJECT_CONTEXT.md                   # ✅ 本文件
-├── 你才是真正的小众king-项目蓝图.md       # 完整项目蓝图（非技术向）
+├── pyproject.toml
+├── .gitignore
+├── .env.example
+├── .env
+├── PROJECT_CONTEXT.md
+├── README.md
+├── 启动.bat                              # Windows 一键启动
+├── 你才是真正的小众king-项目蓝图.md
+├── .streamlit/
+│   └── config.toml                       # gatherUsageStats = false
 ├── .claude/
 │   ├── settings.local.json
-│   └── plans/calm-churning-emerson.md   # 实施计划（技术向）
+│   └── plans/calm-churning-emerson.md
 └── src/
     └── yinyue/
-        ├── __init__.py                  # ✅ 包初始化
+        ├── __init__.py
         ├── db/
-        │   ├── __init__.py              # ✅
-        │   ├── schema.sql               # ✅ 4 张表 DDL
-        │   └── database.py              # ✅ init_db() + get_db()
+        │   ├── __init__.py
+        │   ├── schema.sql
+        │   └── database.py
         ├── api/
-        │   ├── __init__.py              # ✅
-        │   ├── models.py                # ✅ Song, Playlist, NicheScores, AgentContext 等 6 个模型
-        │   ├── pycloudmusic_adapter.py  # ✅ pycloudmusic 封装（扫码登录、歌单、歌曲）
-        │   └── client.py                # ✅ 统一入口 + URL 解析
+        │   ├── __init__.py
+        │   ├── models.py                 # Song, Playlist, NicheScores, UserAnswer, AgentContext 等
+        │   ├── pycloudmusic_adapter.py   # cookie 登录 + 浏览器登录 + 歌单/歌曲 API
+        │   ├── browser_login.py          # ★ v0.2 新增：Playwright 浏览器扫码登录
+        │   └── client.py                 # 统一入口 + URL 解析
         ├── llm/
-        │   ├── __init__.py              # ✅
-        │   ├── base.py                  # ✅ LLMClient 抽象基类（chat + chat_with_tools）
-        │   └── deepseek_client.py       # ✅ DeepSeek v3 客户端（AsyncOpenAI）
+        │   ├── __init__.py
+        │   ├── base.py                   # LLMClient 抽象基类
+        │   └── deepseek_client.py        # DeepSeek v4-pro 客户端（AsyncOpenAI）
         ├── agents/
-        │   ├── __init__.py              # ✅
-        │   ├── base.py                  # ✅ AgentBase（工具注册 + tool-use loop）
-        │   ├── tools.py                 # ✅ 5 个工具定义（fetch_playlist, ask_user, compute_scores, generate_roast, render_pdf）
-        │   ├── interviewer.py           # ✅ 祥子反向提问（generate_questions）
-        │   ├── reviewer.py              # ✅ 祥子锐评（roast）
-        │   ├── pdf_agent.py             # ✅ PDF 生成（fpdf2 + CJK 字体 + 中英双语 fallback）
-        │   └── orchestrator.py          # ✅ 总调度（run_full_pipeline）
+        │   ├── __init__.py
+        │   ├── base.py
+        │   ├── tools.py
+        │   ├── interviewer.py
+        │   ├── reviewer.py               # 上下文构建 + 评分正则提取
+        │   ├── pdf_agent.py
+        │   └── orchestrator.py           # 5 步管线总调度
         ├── prompts/
-        │   ├── __init__.py              # ✅
-        │   ├── orchestrator.py          # ✅ 祥子人设 System Prompt
-        │   ├── interviewer.py           # ✅ 提问风格 Prompt
-        │   └── reviewer.py              # ✅ 锐评格式 Prompt
-        └── ui/
-            ├── __init__.py              # ✅
-            └── app.py                   # ✅ Streamlit 聊天式 Web UI（6 阶段状态机）
-        └── scraper/
-            ├── __init__.py              # ✅
-            ├── rate_limiter.py          # ✅ 令牌桶限流器（3 req/s + jitter）
-            └── pipeline.py              # ✅ 采集管线（拉歌单 → 存 SQLite）
+        │   ├── __init__.py
+        │   ├── orchestrator.py
+        │   ├── interviewer.py
+        │   └── reviewer.py               # ★ 祥子中文锐评提示词（禁止翻译歌名）
+        ├── ui/
+        │   ├── __init__.py
+        │   ├── app.py                    # Streamlit 6 阶段 UI
+        │   └── sakiko.png                # 祥子头像
+        ├── scraper/
+        │   ├── __init__.py
+        │   ├── rate_limiter.py
+        │   └── pipeline.py
         └── scoring/
-            ├── __init__.py              # ✅
-            ├── play_count.py            # ✅ 播放量评分（对数归一化）
-            ├── playlist_penetration.py  # ✅ 热度渗透评分
-            ├── artist_indie.py          # ✅ 艺人独立评分
-            ├── genre_rarity.py          # ✅ 流派稀有度查表
-            └── engine.py                # ✅ 加权汇总 + 百分位排名
+            ├── __init__.py
+            ├── play_count.py
+            ├── playlist_penetration.py
+            ├── artist_indie.py
+            ├── genre_rarity.py
+            └── engine.py
 ```
 
 ---
 
-## 今日变更（2026-05-07）
+## v0.2 变更（2026-05-07，未提交）
 
-### 今日完成
+### 祥子锐评中文优化
+- **`prompts/reviewer.py`**: 重写提示词，强制全文中文 + 禁止翻译歌名 + 去翻译腔
+  - 新增"你是用中文阴阳怪气的高手，不是把日语翻译成中文的翻译机"
+  - 歌名铁律：绝对禁止翻译歌名，保持原文
+- **`agents/reviewer.py`**: 上下文构建时双重强调"歌名保持原文，不要翻译"
 
-| Phase | 文件 | 验证 |
-|-------|------|------|
-| 1 | `pyproject.toml` + `.gitignore` + `.env.example` | `pip install -e .` ✅ |
-| 1 | `src/yinyue/__init__.py` | `import yinyue` ✅ |
-| 1 | `src/db/schema.sql` + `database.py` | `init_db()` → 4 张表 ✅ |
-| 1 | `src/api/models.py` | 6 个 Pydantic 模型 ✅ |
-| 1 | `src/llm/base.py` | `LLMClient` 抽象类 ✅ |
-| 1 | `src/agents/base.py` | `AgentBase` + tool-use loop ✅ |
-| 2 | `src/scraper/rate_limiter.py` | 5 req/0.84s ≈ 5 req/s ✅ |
-| 2 | `src/api/pycloudmusic_adapter.py` | import + 实例化 ✅ |
-| 2 | `src/api/client.py` | URL 解析 4/4 ✅ |
-| 3 | `src/db/database.py` (CRUD) | save_playlist / save_song / playlist_exists ✅ |
-| 3 | `src/scraper/pipeline.py` | URL 解析 + 缓存检查 + 异常处理 ✅ |
-| 4 | `src/scoring/*` (6 files) | 4 子评分器 + 加权引擎; 小众 0.64 > 主流 0.01 ✅ |
-| 5 | `src/llm/deepseek_client.py` | AsyncOpenAI + DeepSeek v3, chat / chat_with_tools ✅ |
-| 5 | `src/agents/tools.py` | 5 个工具，OpenAI function calling 格式 ✅ |
-| 5 | `src/agents/interviewer.py` | 祥子提问，JSON 解析 + 回退 ✅ |
-| 5 | `src/agents/reviewer.py` | 祥子锐评，评分正则提取 ✅ |
-| 5 | `src/agents/pdf_agent.py` | fpdf2 + CJK 字体（simkai.ttf），中英 fallback ✅ |
-| 5 | `src/agents/orchestrator.py` | 5 步管线（fetch→question→score→roast→pdf）✅ |
-| 5 | `src/prompts/*` (4 files) | 祥子人设注入到 orchestrator/interviewer/reviewer ✅ |
-| 6 | `src/yinyue/ui/app.py` | Streamlit 6 阶段 UI（login→input→questions→analyze→results）✅ |
-| 6 | `src/yinyue/ui/__init__.py` | 包初始化 ✅ |
-| — | `pyproject.toml` | 新增 qrcode, Pillow 依赖 ✅ |
-| — | `src/api/pycloudmusic_adapter.py` | 修复 QR 登录 API 调用（qr_key/qr_check/Music163BadCode）✅ |
+### 扫码登录重做（Playwright 方案）
+- **`api/browser_login.py`**: ★ 新文件。Playwright 启动 Chromium → 打开 music.163.com → 用户扫码 → 自动提取 Cookie
+- **`api/pycloudmusic_adapter.py`**: 新增 `launch_browser_login()` + `finish_browser_login()` 方法
+- **`ui/app.py`**: Tab 2 从 API 扫码改为浏览器扫码登录，移除 pycloudmusic QR 依赖
 
-### 数据库
-
-- SQLite：`data/db/yinyue.db`，4 张表，`init_db()` 已验证
-
-### 依赖
-
-- **pycloudmusic** 替代 pyncm（pyncm 不在 PyPI 上），8/8 包验证通过
+### UI 修复
+- **`ui/app.py`**: 
+  - `render_loading_questions()` — 必定生成问题，LLM 失败 fallback 3 个预设问题
+  - `render_questions()` — 去掉跳过按钮，单提交入口
+  - `render_results()` — 锐评改用 `st.markdown()` 渲染，小众排行进 expander
 
 ---
 
-## 当前进度
+## v0.1 完成（已提交：4dde09d → f271c17）
 
-- [x] 蓝图确认
-- [x] 技术栈确定
-- [x] Agent 架构设计
-- [x] Phase 1 全部完成（9/9 文件）
-- [x] Phase 2 全部完成（3/3 文件）
-- [x] Phase 3 全部完成（pipeline + CRUD）
-- [x] Phase 4 全部完成（6 个评分文件）
-- [x] Phase 5: Agent 实现（★ 12 个文件全部完成）
-- [x] Phase 6: Streamlit 聊天式 Web UI（★ 修复 QR 登录 + 6 阶段状态机）
-- [x] Phase 7: PDF 排版打磨 + Git init + README + 收尾
+全部 7 个 Phase 完成，42+ 个文件已提交 Git（master 分支，5 个 commit）。
+
+### 关键修复记录
+- **pycloudmusic `_login()` 无限递归**: 绕过 `_login()`，直接用 aiohttp 调 API
+- **QR 状态码 8821**: 补充到状态消息映射
+- **Streamlit 启动卡住**: `.streamlit/config.toml` 设 `gatherUsageStats = false`
+- **fpdf2 CJK 渲染**: simkai.ttf 优先，`multi_cell` 加 `new_x="LMARGIN", new_y="NEXT"`
+- **DeepSeek 模型更名**: `deepseek-chat` → `deepseek-v4-pro`
+- **启动 bat 中文乱码**: 全部改为英文输出
 
 ---
 
-## v0.1 完成！
-
-全部 7 个 Phase 完成，41 个文件已提交 Git（commit `4dde09d`）。
-
-### 后续可选方向（v0.2+）
+## 后续可选方向（v0.3+）
 - RAG 曲库推歌（BGE embeddings + ChromaDB 向量检索）
-- 网易云评论采集（重新加入评分维度）
+- 游客模式（不登录也能分析公开歌单）
 - Streamlit Cloud 部署
 - 多用户支持 / 分析历史管理
