@@ -28,7 +28,8 @@ if %errorlevel% neq 0 (
 :: Launch
 echo   [START] Sakiko is here...
 echo.
+set STREAMLIT_SERVER_HEADLESS=true
 start "" http://localhost:8501
-python -m streamlit run src/yinyue/ui/app.py --server.port 8501
+python -m streamlit run src/yinyue/ui/app.py --server.port 8501 --server.headless true
 
 pause
