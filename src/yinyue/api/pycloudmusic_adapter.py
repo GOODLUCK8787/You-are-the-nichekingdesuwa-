@@ -1,8 +1,7 @@
-import asyncio
 import logging
 from typing import Optional
 
-from yinyue.api.models import Playlist, Song, Artist, NicheScores
+from yinyue.api.models import Playlist, Song, Artist
 from yinyue.scraper.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
@@ -33,20 +32,28 @@ class PyCloudMusicAdapter:
     async def check_qr(self, key: str) -> dict:
         """Check QR scan status. Returns {'status': int, 'nickname': str}.
         Status codes: 801=waiting, 802=scanned, 803=logged in, 800=expired.
+
+        Uses a direct HTTP call to bypass pycloudmusic's buggy _login()
+        which has infinite recursion on non-200 status codes.
         """
-        if not self._login:
-            raise RuntimeError("Call get_qr() first")
-        from pycloudmusic import Music163BadCode
-        try:
-            cookie = await self._login.qr_check(key)
-            # Success: cookie returned (code 803)
-            if not self._api:
-                from pycloudmusic import Music163Api
-                self._api = Music163Api(cookie)
-            self._logged_in = True
-            return {"status": 803, "nickname": "已登录"}
-        except Music163BadCode as err:
-            return {"status": err.code, "nickname": ""}
+        import aiohttp
+        from pycloudmusic import Music163Api
+
+        url = "https://music.163.com/api/login/qrcode/client/login"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, data={"key": key, "type": 1}) as resp:
+                data = await resp.json(content_type=None)
+                code = data.get("code", 0)
+
+                if code == 803:
+                    raw_cookies = "; ".join(
+                        f"{k}={v.value}" for k, v in resp.cookies.items()
+                    )
+                    self._api = Music163Api(raw_cookies)
+                    self._logged_in = True
+                    return {"status": 803, "nickname": "已登录"}
+
+                return {"status": code, "nickname": ""}
 
     # --- Data fetching ---
 

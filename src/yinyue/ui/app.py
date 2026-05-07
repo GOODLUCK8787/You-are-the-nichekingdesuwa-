@@ -6,7 +6,6 @@ import asyncio
 import logging
 import os
 import sys
-import time
 from io import BytesIO
 from pathlib import Path
 
@@ -50,15 +49,15 @@ st.markdown("""
 # ── Async helper ─────────────────────────────────────────────
 
 def _run(coro):
-    """Run an async coroutine safely from within Streamlit's sync context."""
+    """Run an async coroutine from Streamlit's sync context."""
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
-    # We're inside an already-running loop (unlikely but handle gracefully)
+    # Rare: already inside a running loop — create a new one in a thread
     import concurrent.futures
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
+        return pool.submit(lambda c: asyncio.run(c), coro).result()
 
 
 # ── Session helpers ──────────────────────────────────────────
@@ -195,12 +194,18 @@ def render_login():
                     elif status == 801:
                         st.info("等待扫码中...")
                     elif status == 800:
-                        st.error("二维码已过期，正在刷新...")
+                        st.warning("二维码已过期")
                         st.session_state.qr_key = None
-                        time.sleep(1)
                         st.rerun()
                 except Exception as e:
                     st.error(f"检查登录失败: {e}")
+
+    col_x, col_y, col_z = st.columns([1, 1, 1])
+    with col_y:
+        if st.button("🔄 刷新二维码", use_container_width=True):
+            st.session_state.qr_key = None
+            st.session_state.qr_url = None
+            st.rerun()
 
     st.caption("提示：请先在手机网易云 App 中扫码并确认，再点击上方按钮检查。")
 
