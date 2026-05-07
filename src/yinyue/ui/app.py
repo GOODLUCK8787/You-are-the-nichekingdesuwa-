@@ -50,14 +50,7 @@ st.markdown("""
 
 def _run(coro):
     """Run an async coroutine from Streamlit's sync context."""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-    # Rare: already inside a running loop — create a new one in a thread
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(lambda c: asyncio.run(c), coro).result()
+    return asyncio.run(coro)
 
 
 # ── Session helpers ──────────────────────────────────────────
@@ -179,35 +172,37 @@ def render_login():
 
     st.markdown('<p class="sakiko-quote">「わたくしの審判を受ける覚悟はあって？」</p>', unsafe_allow_html=True)
 
-    col_a, col_b, col_c = st.columns([1, 1, 1])
-    with col_b:
-        if st.button("🔍 检查登录状态", use_container_width=True):
-            with st.spinner("确认中..."):
-                try:
-                    result = _run(client.check_qr(st.session_state.qr_key))
-                    status = result["status"]
-                    if status == 803:
-                        st.session_state.phase = "input"
-                        st.rerun()
-                    elif status == 802:
-                        st.info("已扫码，请在手机上点击确认登录")
-                    elif status == 801:
-                        st.info("等待扫码中...")
-                    elif status == 800:
-                        st.warning("二维码已过期")
-                        st.session_state.qr_key = None
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"检查登录失败: {e}")
+    status_placeholder = st.empty()
 
-    col_x, col_y, col_z = st.columns([1, 1, 1])
-    with col_y:
-        if st.button("🔄 刷新二维码", use_container_width=True):
-            st.session_state.qr_key = None
-            st.session_state.qr_url = None
-            st.rerun()
+    col1, col2, col3, col4 = st.columns([1, 2, 2, 1])
+    with col2:
+        check_clicked = st.button("🔍 检查登录状态", key="check_login", use_container_width=True)
+    with col3:
+        refresh_clicked = st.button("🔄 刷新二维码", key="refresh_qr", use_container_width=True)
 
-    st.caption("提示：请先在手机网易云 App 中扫码并确认，再点击上方按钮检查。")
+    if check_clicked:
+        try:
+            result = _run(client.check_qr(st.session_state.qr_key))
+            status = result["status"]
+            if status == 803:
+                status_placeholder.success("登录成功！")
+                st.session_state.phase = "input"
+                st.rerun()
+            elif status == 802:
+                status_placeholder.info("📱 已扫码，请在手机上点击「确认登录」")
+            elif status == 801:
+                status_placeholder.info("⏳ 等待扫码中... 请用网易云 App 扫描上方二维码")
+            elif status == 800:
+                status_placeholder.warning("二维码已过期，请点击刷新")
+            else:
+                status_placeholder.warning(f"未知状态: {status}")
+        except Exception as e:
+            status_placeholder.error(f"检查失败: {e}")
+
+    if refresh_clicked:
+        st.session_state.qr_key = None
+        st.session_state.qr_url = None
+        st.rerun()
 
 
 # ── Phase: URL Input ─────────────────────────────────────────
