@@ -155,54 +155,77 @@ def render_login():
 
     client = get_api_client()
 
-    if st.session_state.qr_key is None:
-        with st.spinner("正在生成登录二维码..."):
-            try:
-                qr_data = _run(client.get_qr())
-                st.session_state.qr_key = qr_data["key"]
-                st.session_state.qr_url = qr_data["url"]
-            except Exception as e:
-                st.error(f"获取二维码失败，请检查网络连接: {e}")
-                return
+    st.markdown("### 🔐 登录网易云音乐")
+    tab1, tab2 = st.tabs(["🍪 Cookie 登录（推荐）", "📱 扫码登录"])
 
-    qr_img = generate_qr_image(st.session_state.qr_url)
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.image(qr_img, caption="📱 请使用网易云音乐 App 扫描二维码", use_container_width=True)
-
-    st.markdown('<p class="sakiko-quote">「わたくしの審判を受ける覚悟はあって？」</p>', unsafe_allow_html=True)
-
-    status_placeholder = st.empty()
-
-    col1, col2, col3, col4 = st.columns([1, 2, 2, 1])
-    with col2:
-        check_clicked = st.button("🔍 检查登录状态", key="check_login", use_container_width=True)
-    with col3:
-        refresh_clicked = st.button("🔄 刷新二维码", key="refresh_qr", use_container_width=True)
-
-    if check_clicked:
-        try:
-            result = _run(client.check_qr(st.session_state.qr_key))
-            status = result["status"]
-            if status == 803:
-                status_placeholder.success("登录成功！")
+    # ── Tab 1: Cookie login ──────────────────────────────
+    with tab1:
+        st.markdown("""
+        **如何获取 Cookie：**
+        1. 浏览器打开 [music.163.com](https://music.163.com) 并登录
+        2. 按 `F12` → `Application`（应用程序）→ `Cookies` → `music.163.com`
+        3. 找到 `MUSIC_U`，复制它的值
+        4. 粘贴到下方输入框
+        """)
+        cookie_input = st.text_input(
+            "MUSIC_U Cookie",
+            placeholder="粘贴 MUSIC_U 的值或完整 Cookie 字符串...",
+            label_visibility="collapsed",
+        )
+        if cookie_input and st.button("🚀 登录", key="cookie_login", use_container_width=True):
+            if client.login_with_cookie(cookie_input):
                 st.session_state.phase = "input"
                 st.rerun()
-            elif status == 802:
-                status_placeholder.info("📱 已扫码，请在手机上点击「确认登录」")
-            elif status == 801:
-                status_placeholder.info("⏳ 等待扫码中... 请用网易云 App 扫描上方二维码")
-            elif status == 800:
-                status_placeholder.warning("二维码已过期，请点击刷新")
             else:
-                status_placeholder.warning(f"未知状态: {status}")
-        except Exception as e:
-            status_placeholder.error(f"检查失败: {e}")
+                st.error("Cookie 无效，请检查是否已登录 music.163.com 并正确复制了 MUSIC_U 的值")
 
-    if refresh_clicked:
-        st.session_state.qr_key = None
-        st.session_state.qr_url = None
-        st.rerun()
+    # ── Tab 2: QR login ──────────────────────────────────
+    with tab2:
+        if st.session_state.qr_key is None:
+            with st.spinner("正在生成登录二维码..."):
+                try:
+                    qr_data = _run(client.get_qr())
+                    st.session_state.qr_key = qr_data["key"]
+                    st.session_state.qr_url = qr_data["url"]
+                except Exception as e:
+                    st.error(f"获取二维码失败: {e}")
+                    return
+
+        qr_img = generate_qr_image(st.session_state.qr_url)
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.image(qr_img, caption="📱 请使用网易云音乐 App 扫描二维码", use_container_width=True)
+
+        status_placeholder = st.empty()
+
+        col1, col2, col3, col4 = st.columns([1, 2, 2, 1])
+        with col2:
+            check_clicked = st.button("🔍 检查登录状态", key="check_login", use_container_width=True)
+        with col3:
+            refresh_clicked = st.button("🔄 刷新二维码", key="refresh_qr", use_container_width=True)
+
+        if check_clicked:
+            try:
+                result = _run(client.check_qr(st.session_state.qr_key))
+                msg = result.get("message", str(result.get("status", "")))
+                status = result["status"]
+                if status == 803:
+                    status_placeholder.success(msg)
+                    st.session_state.phase = "input"
+                    st.rerun()
+                elif status in (801, 802, 8821):
+                    status_placeholder.info(f"📱 {msg}")
+                elif status == 800:
+                    status_placeholder.warning(f"⚠️ {msg}，请点击刷新")
+                else:
+                    status_placeholder.warning(f"状态: {msg}")
+            except Exception as e:
+                status_placeholder.error(f"检查失败: {e}")
+
+        if refresh_clicked:
+            st.session_state.qr_key = None
+            st.session_state.qr_url = None
+            st.rerun()
 
 
 # ── Phase: URL Input ─────────────────────────────────────────

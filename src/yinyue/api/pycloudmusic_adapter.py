@@ -1,10 +1,17 @@
 import logging
-from typing import Optional
 
 from yinyue.api.models import Playlist, Song, Artist
 from yinyue.scraper.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
+
+QR_STATUS_MESSAGES = {
+    801: "等待扫码",
+    802: "已扫码，请在手机上确认登录",
+    803: "登录成功",
+    800: "二维码已过期",
+    8821: "请在手机上确认登录",
+}
 
 
 class PyCloudMusicAdapter:
@@ -12,7 +19,6 @@ class PyCloudMusicAdapter:
 
     def __init__(self, rate: float = 3.0):
         self._api = None          # Music163Api instance (set after login)
-        self._login = None        # LoginMusic163 instance
         self._logged_in = False
         self._rate_limiter = RateLimiter(rate=rate)
 
@@ -20,18 +26,40 @@ class PyCloudMusicAdapter:
     def is_logged_in(self) -> bool:
         return self._logged_in
 
-    # --- Login ---
+    # --- Cookie login (most reliable) ---
+
+    def login_with_cookie(self, cookie_str: str) -> bool:
+        """Login directly with a browser cookie string.
+
+        The user copies their cookie from music.163.com after logging in
+        via browser. Paste the full cookie string or just MUSIC_U=xxx.
+        """
+        from pycloudmusic import Music163Api
+
+        if not cookie_str.strip():
+            return False
+        if "MUSIC_U=" not in cookie_str:
+            cookie_str = f"MUSIC_U={cookie_str.strip()}"
+        try:
+            self._api = Music163Api(cookie_str)
+            self._logged_in = True
+            logger.info("Cookie login successful")
+            return True
+        except Exception as e:
+            logger.error(f"Cookie login failed: {e}")
+            return False
+
+    # --- QR login (alternative) ---
 
     async def get_qr(self) -> dict:
         """Get QR code for login. Returns {'key': str, 'url': str}."""
         from pycloudmusic import LoginMusic163
-        self._login = LoginMusic163()
-        key, url = await self._login.qr_key()
+        login = LoginMusic163()
+        key, url = await login.qr_key()
         return {"key": key, "url": url}
 
     async def check_qr(self, key: str) -> dict:
-        """Check QR scan status. Returns {'status': int, 'nickname': str}.
-        Status codes: 801=waiting, 802=scanned, 803=logged in, 800=expired.
+        """Check QR scan status. Returns {'status': int, 'message': str}.
 
         Uses a direct HTTP call to bypass pycloudmusic's buggy _login()
         which has infinite recursion on non-200 status codes.
@@ -51,17 +79,17 @@ class PyCloudMusicAdapter:
                     )
                     self._api = Music163Api(raw_cookies)
                     self._logged_in = True
-                    return {"status": 803, "nickname": "已登录"}
 
-                return {"status": code, "nickname": ""}
+                return {
+                    "status": code,
+                    "message": QR_STATUS_MESSAGES.get(code, f"状态码 {code}"),
+                }
 
     # --- Data fetching ---
 
     async def get_playlist(self, playlist_id: int) -> Playlist:
-        """Fetch playlist metadata + song list."""
         if not self._api:
-            raise RuntimeError("Not logged in. Call check_qr() first.")
-
+            raise RuntimeError("Not logged in.")
         await self._rate_limiter.acquire()
         raw = await self._api.playlist(playlist_id)
 
@@ -80,7 +108,6 @@ class PyCloudMusicAdapter:
             songs=[],
         )
 
-        # Convert raw tracks to Song models
         for track in raw.music_list:
             artists = [Artist(netease_id=ar["id"], name=ar["name"]) for ar in track.get("ar", [])]
             song = Song(
@@ -99,7 +126,6 @@ class PyCloudMusicAdapter:
         return playlist
 
     async def get_song_details(self, song_ids: list[int]) -> list[Song]:
-        """Fetch detailed song info for a list of song IDs."""
         if not self._api:
             raise RuntimeError("Not logged in.")
 

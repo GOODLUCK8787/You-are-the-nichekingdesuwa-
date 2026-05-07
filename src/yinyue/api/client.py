@@ -28,6 +28,10 @@ class NetEaseClient:
 
     # --- Login ---
 
+    def login_with_cookie(self, cookie_str: str) -> bool:
+        """Login directly with a browser cookie string."""
+        return self._adapter.login_with_cookie(cookie_str)
+
     async def get_qr(self) -> dict:
         return await self._adapter.get_qr()
 
