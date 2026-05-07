@@ -1,0 +1,24 @@
+[project]
+name = "yinyue"
+version = "0.1.0"
+description = "你才是真正的小众king — 网易云歌单 Agent 分析与锐评"
+requires-python = ">=3.12"
+dependencies = [
+    "pycloudmusic>=0.1.4",
+    "pydantic>=2.0",
+    "python-dotenv>=1.0",
+    "openai>=1.0",
+    "rich>=13.0",
+    "jinja2>=3.1",
+    "streamlit>=1.28",
+    "fpdf2>=2.7",
+    "qrcode>=7.4",
+    "Pillow>=10.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

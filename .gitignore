@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+venv/
+
+# uv
+uv.lock
+
+# Environment
+.env
+
+# Project data
+data/
+outputs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
